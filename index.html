@@ -21,7 +21,7 @@
 <body>
 
     <h1>🎬 動画危険性（音声・映像分離）判定システム</h1>
-    <p style="color: #666; font-size: 14px;">※GitHub Pages上で、ブラウザ内（WebAssembly）AI判定を実行します。</p>
+    <p style="color: #666; font-size: 14px;">※すべてのAI解析をブラウザ内（WebAssembly）で実行します。</p>
     
     <div class="card">
         <h3>1. 動画ファイルを選択</h3>
@@ -37,92 +37,4 @@
         <div class="flex-container">
             <div class="column">
                 <h3>🎙️ 音声解析モジュール (Whisper)</h3>
-                <p><strong>状態:</strong> <span id="audioStatus"></span></p>
-                <p><strong>文字起こし結果:</strong></p>
-                <div id="transcription" style="background:#eee; padding:10px; border-radius:4px; font-style:italic; min-height:50px;"></div>
-                <p><strong>検出キーワード:</strong> <span id="words">なし</span></p>
-            </div>
-
-            <div class="column">
-                <h3>🖼️ 映像解析モジュール (Vision AI)</h3>
-                <p><strong>状態:</strong> <span id="visualStatus"></span></p>
-                <p><strong>フレーム別判定結果:</strong></p>
-                <ul id="frames" style="max-height: 220px; overflow-y: auto; padding-left: 20px;"></ul>
-            </div>
-        </div>
-    </div>
-
-    <canvas id="canvas" style="display:none;"></canvas>
-
-    <script type="module">
-        import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
-        
-        env.allowLocalModels = false;
-        env.useBrowserCache = true;
-
-        let transcriber = null;
-        let imageClassifier = null;
-
-        function log(msg) {
-            const box = document.getElementById('statusBox');
-            box.style.display = 'block';
-            box.textContent = msg;
-            console.log(msg);
-        }
-
-        // ページ読み込み完了の通知
-        log("✅ システム準備完了。動画を選択して「判定実行」を押してください。");
-
-        document.getElementById('runBtn').addEventListener('click', async () => {
-            const fileInput = document.getElementById('videoFile');
-            const runBtn = document.getElementById('runBtn');
-
-            if (!fileInput.files[0]) {
-                alert('動画ファイルを選択してください。');
-                return;
-            }
-
-            runBtn.disabled = true;
-            document.getElementById('resultCard').style.display = 'none';
-
-            try {
-                if (!transcriber) {
-                    log("⏳ [1/4] 音声モデル (Whisper) をダウンロード中...\n※初回のみ通信に時間がかかります。そのままお待ちください。");
-                    transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny');
-                    log("* Verification: 音声モデルの読み込みが成功しました。");
-                }
-                
-                if (!imageClassifier) {
-                    log("⏳ [2/4] 画像モデル (MobileNet) をダウンロード中...");
-                    imageClassifier = await pipeline('image-classification', 'Xenova/mobilenetv2_1.0_224');
-                    log("* Verification: 画像モデルの読み込みが成功しました。");
-                }
-
-                const file = fileInput.files[0];
-                const videoUrl = URL.createObjectURL(file);
-
-                log("🎙️ [3/4] 音声トラックを分離して文字起こし中...");
-                const audioAnalysis = await processAudio(file);
-
-                log("🖼️ [4/4] 映像フレームの生成とAI分析中...");
-                const visualAnalysis = await processVisual(videoUrl);
-
-                log("✅ すべての解析が完了しました！");
-                document.getElementById('resultCard').style.display = 'block';
-
-                const isSafe = !(audioAnalysis.flagged || visualAnalysis.flagged);
-                const overallEl = document.getElementById('overall');
-                overallEl.textContent = isSafe ? '✅ 安全 (問題なし)' : '⚠️ 危険要素検知';
-                overallEl.className = isSafe ? 'safe' : 'danger';
-
-                document.getElementById('audioStatus').innerHTML = audioAnalysis.flagged 
-                    ? '<span class="danger">⚠️ NGワード検知</span>' 
-                    : '<span class="safe">✅ 安全</span>';
-                document.getElementById('transcription').textContent = audioAnalysis.text || '(音声なし/検出不可)';
-                document.getElementById('words').textContent = audioAnalysis.words.length > 0 ? audioAnalysis.words.join(', ') : 'なし';
-
-                document.getElementById('visualStatus').innerHTML = visualAnalysis.flagged 
-                    ? '<span class="danger">⚠️ 不適切・危険映像要素検知</span>' 
-                    : '<span class="safe">✅ 安全</span>';
-
-                const frameList = document
+                <p><strong>状態:</strong> <span id="audioStatus
