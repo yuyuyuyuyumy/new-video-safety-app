@@ -17,6 +17,8 @@
         button:disabled { background: #aaa; cursor: not-allowed; }
         #statusBox { font-weight: bold; color: #0066cc; padding: 15px; background: #e3f2fd; border: 2px solid #2196f3; border-radius: 6px; margin-top: 15px; white-space: pre-wrap; font-size: 15px; }
     </style>
+    <!-- JSライブラリを一番確実に読み込む方式に変更 -->
+    <script src="https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/transformers.min.js"></script>
 </head>
 <body>
 
@@ -28,7 +30,7 @@
         <input type="file" id="videoFile" accept="video/*">
         <br><br>
         <button id="runBtn">判定実行</button>
-        <div id="statusBox">システム準備中...</div>
+        <div id="statusBox">初期化中...</div>
     </div>
 
     <div id="resultCard" class="card" style="display:none;">
@@ -37,4 +39,198 @@
         <div class="flex-container">
             <div class="column">
                 <h3>🎙️ 音声解析モジュール (Whisper)</h3>
-                <p><strong>状態:</strong> <span id="audioStatus
+                <p><strong>状態:</strong> <span id="audioStatus"></span></p>
+                <p><strong>文字起こし結果:</strong></p>
+                <div id="transcription" style="background:#eee; padding:10px; border-radius:4px; font-style:italic; min-height:50px;"></div>
+                <p><strong>検出キーワード:</strong> <span id="words">なし</span></p>
+            </div>
+
+            <div class="column">
+                <h3>🖼️ 映像解析モジュール (Vision AI)</h3>
+                <p><strong>状態:</strong> <span id="visualStatus"></span></p>
+                <p><strong>フレーム別判定結果:</strong></p>
+                <ul id="frames" style="max-height: 220px; overflow-y: auto; padding-left: 20px;"></ul>
+            </div>
+        </div>
+    </div>
+
+    <canvas id="canvas" style="display:none;"></canvas>
+
+    <script>
+        function log(msg) {
+            const box = document.getElementById('statusBox');
+            box.style.display = 'block';
+            box.textContent = msg;
+            console.log(msg);
+        }
+
+        // ライブラリの読み込み完了チェック
+        window.addEventListener('DOMContentLoaded', () => {
+            if (window.transformers) {
+                window.transformers.env.allowLocalModels = false;
+                window.transformers.env.useBrowserCache = true;
+                log("✅ システム準備完了。動画を選択して「判定実行」を押してください。");
+            } else {
+                log("❌ ライブラリの読み込みに失敗しました。ページを再読み込みしてください。");
+            }
+        });
+
+        let transcriber = null;
+        let imageClassifier = null;
+
+        document.getElementById('runBtn').addEventListener('click', async () => {
+            const fileInput = document.getElementById('videoFile');
+            const runBtn = document.getElementById('runBtn');
+
+            if (!fileInput.files[0]) {
+                alert('動画ファイルを選択してください。');
+                return;
+            }
+
+            runBtn.disabled = true;
+            document.getElementById('resultCard').style.display = 'none';
+
+            try {
+                const { pipeline } = window.transformers;
+
+                if (!transcriber) {
+                    log("⏳ [1/4] 音声モデル (Whisper) を読み込み中...\n※初回のみモデルのダウンロードが発生します。");
+                    transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny');
+                }
+                
+                if (!imageClassifier) {
+                    log("⏳ [2/4] 画像モデル (MobileNet) を読み込み中...");
+                    imageClassifier = await pipeline('image-classification', 'Xenova/mobilenetv2_1.0_224');
+                }
+
+                const file = fileInput.files[0];
+                const videoUrl = URL.createObjectURL(file);
+
+                log("🎙️ [3/4] 音声トラックを分離して文字起こし中...");
+                const audioAnalysis = await processAudio(file);
+
+                log("🖼️ [4/4] 映像フレームを抽出してAI解析中...");
+                const visualAnalysis = await processVisual(videoUrl);
+
+                log("✅ すべての解析が完了しました！");
+                document.getElementById('resultCard').style.display = 'block';
+
+                const isSafe = !(audioAnalysis.flagged || visualAnalysis.flagged);
+                const overallEl = document.getElementById('overall');
+                overallEl.textContent = isSafe ? '✅ 安全 (問題なし)' : '⚠️ 危険要素検知';
+                overallEl.className = isSafe ? 'safe' : 'danger';
+
+                document.getElementById('audioStatus').innerHTML = audioAnalysis.flagged 
+                    ? '<span class="danger">⚠️ NGワード検知</span>' 
+                    : '<span class="safe">✅ 安全</span>';
+                document.getElementById('transcription').textContent = audioAnalysis.text || '(音声なし/検出不可)';
+                document.getElementById('words').textContent = audioAnalysis.words.length > 0 ? audioAnalysis.words.join(', ') : 'なし';
+
+                document.getElementById('visualStatus').innerHTML = visualAnalysis.flagged 
+                    ? '<span class="danger">⚠️ 不適切・危険映像要素検知</span>' 
+                    : '<span class="safe">✅ 安全</span>';
+
+                const frameList = document.getElementById('frames');
+                frameList.innerHTML = '';
+                visualAnalysis.frames.forEach(f => {
+                    const li = document.createElement('li');
+                    const badge = f.is_unsafe 
+                        ? `<span class="badge-danger">警告: ${f.detectedLabel}</span>`
+                        : `<span class="badge-safe">正常 (${f.topLabel})</span>`;
+                    li.innerHTML = `${f.second}秒目: ${badge}`;
+                    frameList.appendChild(li);
+                });
+
+                URL.revokeObjectURL(videoUrl);
+
+            } catch (err) {
+                log("❌ エラーが発生しました:\n" + err.message);
+                console.error(err);
+            } finally {
+                runBtn.disabled = false;
+            }
+        });
+
+        async function processAudio(file) {
+            try {
+                const arrayBuffer = await file.arrayBuffer();
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+                const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+                const channelData = audioBuffer.getChannelData(0);
+
+                const output = await transcriber(channelData);
+                const text = output.text || "";
+                
+                const ngList = ["殺す", "暴力", "爆破", "詐欺", "攻撃", "危険", "死ね", "danger", "kill", "fire"];
+                const detected = ngList.filter(w => text.toLowerCase().includes(w.toLowerCase()));
+
+                return { text, flagged: detected.length > 0, words: detected };
+            } catch (e) {
+                console.warn("音声処理スキップ:", e);
+                return { text: "(音声解析不可)", flagged: false, words: [] };
+            }
+        }
+
+        async function processVisual(videoUrl) {
+            return new Promise((resolve) => {
+                const video = document.createElement('video');
+                video.src = videoUrl;
+                video.muted = true;
+                video.playsInline = true;
+
+                const canvas = document.getElementById('canvas');
+                const ctx = canvas.getContext('2d');
+                const frames = [];
+                let hasDanger = false;
+
+                const dangerLabels = ["weapon", "knife", "gun", "fire", "blood", "rifle", "military"];
+
+                video.onloadedmetadata = async () => {
+                    canvas.width = 224;
+                    canvas.height = 224;
+
+                    const maxSeconds = Math.min(Math.floor(video.duration || 5), 10);
+
+                    for (let sec = 0; sec < maxSeconds; sec++) {
+                        log(`🖼️ [4/4] 映像フレーム解析中... (${sec + 1}/${maxSeconds} 秒目)`);
+                        video.currentTime = sec;
+                        
+                        await new Promise(r => {
+                            const onSeek = () => {
+                                video.removeEventListener('seeked', onSeek);
+                                r();
+                            };
+                            video.addEventListener('seeked', onSeek);
+                            setTimeout(r, 400);
+                        });
+
+                        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                        const imgDataUrl = canvas.toDataURL('image/jpeg', 0.6);
+
+                        const preds = await imageClassifier(imgDataUrl);
+                        const topPred = preds[0] || { label: "unknown", score: 0 };
+                        
+                        const detectedDanger = preds.find(p => dangerLabels.some(dl => p.label.toLowerCase().includes(dl)));
+                        const isUnsafe = !!detectedDanger;
+
+                        if (isUnsafe) hasDanger = true;
+
+                        frames.push({
+                            second: sec,
+                            topLabel: topPred.label.split(',')[0],
+                            detectedLabel: isUnsafe ? detectedDanger.label.split(',')[0] : "",
+                            is_unsafe: isUnsafe
+                        });
+                    }
+
+                    resolve({ flagged: hasDanger, frames });
+                };
+
+                video.onerror = () => {
+                    resolve({ flagged: false, frames: [] });
+                };
+            });
+        }
+    </script>
+</body>
+</html>
