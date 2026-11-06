@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>エッジAI 動画危険性（音声・映像分離）判定システム</title>
+    <style>
+        body { font-family: sans-serif; max-width: 850px; margin: 40px auto; padding: 20px; background: #f4f7f6; line-height: 1.6; }
+        .card { border: 1px solid #ccc; padding: 20px; border-radius: 8px; margin-bottom: 20px; background: #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .flex-container { display: flex; gap: 20px; }
+        .column { flex: 1; padding: 15px; border-radius: 6px; background: #fafafa; border: 1px solid #eee; }
+        .safe { color: #2e7d32; font-weight: bold; }
+        .danger { color: #c62828; font-weight: bold; }
+        .badge-danger { background: #ffebee; color: #c62828; padding: 2px 6px; border-radius: 4px; font-size: 12px; font-weight: bold; }
+        .badge-safe { background: #e8f5e9; color: #2e7d32; padding: 2px 6px; border-radius: 4px; font-size: 12px; font-weight: bold; }
+        button { padding: 10px 20px; background: #0066cc; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
+        button:disabled { background: #aaa; cursor: not-allowed; }
+        #status { font-weight: bold; color: #0066cc; padding: 10px; background: #e3f2fd; border-radius: 4px; margin-top: 15px; }
+    </style>
+    <!-- Transformers.js の読み込み -->
+    <script type="module">
+        import { pipeline, env } from 'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2';
+        window.pipeline = pipeline;
+        env.allowLocalModels = false;
+        env.useBrowserCache = true;
+    </script>
+</head>
+<body>
+
+    <h1>🎬 動画危険性（音声・映像分離）判定システム</h1>
+    <p style="color: #666; font-size: 14px;">※すべてのAI解析をブラウザ内（WebAssembly）で実行します。</p>
+    
+    <div class="card">
+        <h3>動画ファイル選択</h3>
+        <input type="file" id="videoFile" accept="video/*">
+        <br><br>
+        <button id="runBtn">判定実行</button>
+        <div id="status" style="display:none;"></div>
+    </div>
+
+    <div id="resultCard" class="card" style="display:none;">
+        <h2>総合判定: <span id="overall"></span></h2>
+        
+        <div class="flex-container">
+            <!-- 音声解析モジュール -->
+            <div class="column">
+                <h3>🎙️ 音声解析モジュール (Whisper-tiny)</h3>
+                <p><strong>状態:</strong> <span id="audioStatus"></span></p>
+                <p><strong>文字起こし結果:</strong></p>
+                <div id="transcription" style="background:#eee; padding:10px; border-radius:4px; font-style:italic; min-height:50px;"></div>
+                <p><strong>検出キーワード:</strong> <span id="words">なし</span></p>
+            </div>
+
+            <!-- 映像解析モジュール -->
+            <div class="column">
+                <h3>🖼️ 映像解析モジュール (Vision AI)</h3>
+                <p><strong>状態:</strong> <span id="visualStatus"></span></p>
+                <p><strong>フレーム別判定結果:</strong></p>
+                <ul id="frames" style="max-height: 220px; overflow-y: auto; padding-left: 20px;"></ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- 非表示のキャンバス -->
+    <canvas id="canvas" style="display:none;"></canvas>
+
+    <script>
+        let transcriber = null;
+        let imageClassifier = null;
+
+        const updateStatus = (text) => {
+            const statusEl = document.getElementById('status');
+            statusEl.style.display = 'block';
+            statusEl.textContent = text;
+            console.log(text); // コンソールにもリアルタイム出力
+        };
+
+        async function startAnalysis() {
+            const fileInput = document.getElementById('videoFile');
+            const runBtn = document.getElementById('runBtn');
+            if (!fileInput.files[0]) {
+                alert('動画ファイルを選択してください。');
+                return;
+            }
+
+            runBtn.disabled = true;
+            document.getElementById('resultCard').style.display = 'none';
+
+            try {
+                // 1. AIモデル読み込み
+                if (!transcriber) {
+                    updateStatus('⏳ [1/4] 音声モデル (Whisper) をダウンロード中...（初回のみ時間がかかります）');
+                    transcriber = await window.pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny');
+                }
+                if (!imageClassifier) {
+                    updateStatus('⏳ [2/4] 画像モデル (MobileNet) をダウンロード中...');
+                    imageClassifier = await window.pipeline('image-classification', 'Xenova/mobilenetv2_1.
